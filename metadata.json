@@ -1,0 +1,6 @@
+{
+  "name": "AceRank - Ranking de Tênis",
+  "description": "Sistema completo para ranking de tênis entre amigos, com registro de partidas, histórico, H2H e estatísticas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
