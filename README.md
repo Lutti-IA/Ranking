@@ -51,12 +51,16 @@ Crie as seguintes tabelas no seu projeto Supabase:
 
 #### Tabela `matches`
 - `id`: UUID (Primary Key, Default: gen_random_uuid())
-- `player1_id`: UUID (Foreign Key -> players.id)
-- `player2_id`: UUID (Foreign Key -> players.id)
-- `sets`: JSONB (Ex: `[{"player1": 6, "player2": 4}]`)
+- `player_1_id`: UUID (Foreign Key -> players.id)
+- `player_2_id`: UUID (Foreign Key -> players.id)
+- `player_1_name`: Text
+- `player_2_name`: Text
 - `winner_id`: UUID (Foreign Key -> players.id)
+- `sets`: JSONB (Ex: `[{"player1": 6, "player2": 4}]`)
+- `type`: Text (Ex: 'competitive')
+- `status`: Text (Ex: 'approved')
+- `reported_by`: UUID (Foreign Key -> players.id)
 - `date`: Timestamp with time zone (Default: now())
-- `status`: Text (Ex: 'completed')
 
 ## 🚀 Deploy no Vercel
 

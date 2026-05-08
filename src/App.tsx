@@ -41,6 +41,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isResetConfirming, setIsResetConfirming] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [currentUser, setCurrentUser] = useState<{ id: string, name: string, role: 'admin' | 'player' } | null>(null);
   const [loginError, setLoginError] = useState('');
   const [playerError, setPlayerError] = useState('');
@@ -339,14 +340,27 @@ export default function App() {
       return;
     }
 
-    const updatedData = await StorageService.fetchFromSupabase();
-    if (updatedData) {
-      setState(updatedData);
-    } else {
-      setState(StorageService.getLocal());
-    }
+    setState(StorageService.getLocal());
     setEditingPlayer(null);
     setLoading(false);
+  };
+  
+  const handleSyncData = async () => {
+    if (!StorageService.hasConfig()) {
+      alert('Configure as chaves do Supabase primeiro nos "Secrets".');
+      return;
+    }
+    
+    setIsSyncing(true);
+    const result = await StorageService.syncLocalToSupabase();
+    if (result.success) {
+      alert(`Sincronização concluída! ${result.count || 0} jogadores processados.`);
+      const refreshed = await StorageService.fetchFromSupabase();
+      if (refreshed) setState(refreshed);
+    } else {
+      alert(`Erro na sincronização: ${result.error}`);
+    }
+    setIsSyncing(false);
   };
 
   if (loading) {
@@ -818,19 +832,30 @@ export default function App() {
               >
                 <div className="mb-10">
                   <h2 className="text-5xl font-black text-white tracking-tighter leading-none italic uppercase">PARTICIPANTES</h2>
-                  <p className="text-slate-400 font-medium mt-3 tracking-widest uppercase text-xs">Membros Ativos do Ranking</p>
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mt-3">
+                    <p className="text-slate-400 font-medium tracking-widest uppercase text-xs">Membros Ativos do Ranking</p>
+                    {currentUser?.role === 'admin' && StorageService.hasConfig() && (
+                      <button 
+                        onClick={handleSyncData}
+                        disabled={isSyncing}
+                        className="flex items-center gap-2 text-[10px] font-black text-lime-400 hover:text-lime-300 transition-colors uppercase tracking-widest px-4 py-2 rounded-xl bg-lime-400/5 border border-lime-400/20 disabled:opacity-50"
+                      >
+                        <RotateCcw size={12} className={isSyncing ? 'animate-spin' : ''} />
+                        {isSyncing ? 'SINCRONIZANDO...' : 'SINCRONIZAR COM NUVEM'}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {currentUser?.role === 'admin' && (
-                  <div className="space-y-6">
-                    {!StorageService.hasConfig() && (
-                      <div className="bg-amber-500/10 border border-amber-500/50 text-amber-500 p-4 rounded-2xl text-xs font-bold flex flex-col gap-1 items-center text-center">
-                        <p>⚠️ SUPABASE NÃO CONFIGURADO NO PAINEL "SECRETS"</p>
-                        <p className="opacity-70 font-medium">Os dados serão salvos apenas neste navegador até você configurar as chaves VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.</p>
-                      </div>
-                    )}
-                    
-                    <div className="bg-slate-900 rounded-[2.5rem] p-12 shadow-2xl border border-slate-800">
+                <div className="space-y-6">
+                  {!StorageService.hasConfig() && (
+                    <div className="bg-amber-500/10 border border-amber-500/50 text-amber-500 p-4 rounded-2xl text-xs font-bold flex flex-col gap-1 items-center text-center">
+                      <p>⚠️ SUPABASE NÃO CONFIGURADO NO PAINEL "SECRETS"</p>
+                      <p className="opacity-70 font-medium">Os dados serão salvos apenas neste navegador até você configurar as chaves VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.</p>
+                    </div>
+                  )}
+                  
+                  <div className="bg-slate-900 rounded-[2.5rem] p-12 shadow-2xl border border-slate-800">
                       <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 mb-8 border-l-4 border-lime-400 pl-4">Pré-Cadastrar Jogador</h3>
                       <form onSubmit={handleAddPlayer} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
                         <div className="space-y-2 lg:col-span-1">
@@ -889,7 +914,6 @@ export default function App() {
                       {playerError && <p className="text-red-400 text-xs font-bold font-mono tracking-tight bg-red-400/5 px-4 py-2 rounded-lg border border-red-400/10 inline-block mt-4">{playerError}</p>}
                     </div>
                 </div>
-              )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                   {[...state.players]

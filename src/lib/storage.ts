@@ -4,7 +4,7 @@
  */
 
 import { Player, Match, AppState } from '../types';
-import { supabase } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 const STORAGE_KEY = 'acerank_data';
 
@@ -26,9 +26,7 @@ export const StorageService = {
 
   // --- SUPABASE SYNC ---
   async fetchFromSupabase(): Promise<AppState | null> {
-    const hasSupabase = this.hasConfig();
-
-    if (!hasSupabase) {
+    if (!isSupabaseConfigured) {
       console.log('Supabase não configurado ou com valores padrão.');
       return null;
     }
@@ -44,7 +42,13 @@ export const StorageService = {
         .select('*');
 
       if (pError || mError) {
-        console.error('Erro na busca do Supabase:', pError || mError);
+        // Se for um erro de rede (Failed to fetch), tratamos como configuração pendente
+        const isNetworkError = (pError?.message?.includes('fetch') || mError?.message?.includes('fetch'));
+        if (isNetworkError) {
+          console.warn('Supabase: Erro de conexão. Verifique as chaves VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY nos Secrets.');
+        } else {
+          console.error('Supabase: Erro na resposta:', pError || mError);
+        }
         return null;
       }
 
@@ -54,10 +58,10 @@ export const StorageService = {
         username: p.username,
         avatar: p.avatar,
         password: p.password,
-        matchesPlayed: p.matches_played,
-        wins: p.wins,
-        losses: p.losses,
-        points: p.points,
+        matchesPlayed: p.matches_played || 0,
+        wins: p.wins || 0,
+        losses: p.losses || 0,
+        points: p.points || 0,
         lastActive: p.last_active,
         role: p.role
       }));
@@ -84,12 +88,7 @@ export const StorageService = {
   },
 
   hasConfig(): boolean {
-    const url = import.meta.env.VITE_SUPABASE_URL;
-    const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    return !!url && !!key && 
-           url !== 'YOUR_SUPABASE_URL' && 
-           url !== 'MY_SUPABASE_URL' && 
-           url.includes('supabase.co');
+    return isSupabaseConfigured;
   },
 
   generateUUID(): string {
@@ -132,7 +131,8 @@ export const StorageService = {
           wins: newPlayer.wins,
           losses: newPlayer.losses,
           points: newPlayer.points,
-          last_active: newPlayer.lastActive
+          last_active: newPlayer.lastActive,
+          role: 'player'
         };
         
         const { error } = await supabase.from('players').insert([payload]);
@@ -180,20 +180,25 @@ export const StorageService = {
     p1.lastActive = match.date;
     p2.lastActive = match.date;
 
+    // Points calculation based on rank (superior position = more points)
+    const winner = match.winnerId === p1.id ? p1 : p2;
+    const loser = match.winnerId === p1.id ? p2 : p1;
+    const pointsToAdd = winner.points < loser.points ? 20 : 10;
+
     if (match.winnerId === p1.id) {
       p1.wins++;
-      p1.points += 10;
+      p1.points += pointsToAdd;
       p2.losses++;
     } else {
       p2.wins++;
-      p2.points += 10;
+      p2.points += pointsToAdd;
       p1.losses++;
     }
 
     if (this.hasConfig()) {
       console.log('Tentando registrar partida no Supabase...');
       try {
-        // Create match
+        // Create match only - Database trigger handles player stats
         const { error: mErr } = await supabase.from('matches').insert([{
           id: match.id,
           date: match.date,
@@ -207,25 +212,8 @@ export const StorageService = {
           status: match.status
         }]);
 
-        // Update players
-        const { error: p1Err } = await supabase.from('players').update({
-          matches_played: p1.matchesPlayed,
-          wins: p1.wins,
-          losses: p1.losses,
-          points: p1.points,
-          last_active: p1.lastActive
-        }).eq('id', p1.id);
-
-        const { error: p2Err } = await supabase.from('players').update({
-          matches_played: p2.matchesPlayed,
-          wins: p2.wins,
-          losses: p2.losses,
-          points: p2.points,
-          last_active: p2.lastActive
-        }).eq('id', p2.id);
-
-        if (mErr || p1Err || p2Err) {
-          console.error('Supabase addMatch error', { mErr, p1Err, p2Err });
+        if (mErr) {
+          console.error('Supabase addMatch error', mErr);
           return { success: false, error: 'Erro ao sincronizar partida com Supabase.' };
         }
         console.log('Partida registrada com sucesso no Supabase');
@@ -302,37 +290,27 @@ export const StorageService = {
     p1.lastActive = new Date().toISOString();
     p2.lastActive = new Date().toISOString();
 
+    // Points calculation based on rank (superior position = more points)
+    const winner = match.winnerId === p1.id ? p1 : p2;
+    const loser = match.winnerId === p1.id ? p2 : p1;
+    const pointsToAdd = winner.points < loser.points ? 20 : 10;
+
     if (match.winnerId === p1.id) {
       p1.wins++;
-      p1.points += 10;
+      p1.points += pointsToAdd;
       p2.losses++;
     } else {
       p2.wins++;
-      p2.points += 10;
+      p2.points += pointsToAdd;
       p1.losses++;
     }
 
     if (this.hasConfig()) {
       try {
+        // Appointing match status to approved. Trigger handles stats.
         const { error: mErr } = await supabase.from('matches').update({ status: 'approved' }).eq('id', matchId);
         
-        const { error: p1Err } = await supabase.from('players').update({
-          matches_played: p1.matchesPlayed,
-          wins: p1.wins,
-          losses: p1.losses,
-          points: p1.points,
-          last_active: p1.lastActive
-        }).eq('id', p1.id);
-
-        const { error: p2Err } = await supabase.from('players').update({
-          matches_played: p2.matchesPlayed,
-          wins: p2.wins,
-          losses: p2.losses,
-          points: p2.points,
-          last_active: p2.lastActive
-        }).eq('id', p2.id);
-
-        if (mErr || p1Err || p2Err) return { success: false, error: 'Erro ao sincronizar com Supabase' };
+        if (mErr) return { success: false, error: 'Erro ao aprovar partida no Supabase' };
       } catch (e) {
         return { success: false, error: 'Conexão falhou' };
       }
@@ -407,6 +385,7 @@ export const StorageService = {
         if (updates.username !== undefined) payload.username = updates.username;
         if (updates.avatar !== undefined) payload.avatar = updates.avatar;
         if (updates.password !== undefined) payload.password = updates.password;
+        payload.last_active = new Date().toISOString();
 
         const { error } = await supabase.from('players').update(payload).eq('id', playerId);
 
@@ -443,5 +422,60 @@ export const StorageService = {
 
   reset(): void {
     localStorage.removeItem(STORAGE_KEY);
+  },
+
+  async syncLocalToSupabase(): Promise<{ success: boolean; error?: string; count?: number }> {
+    if (!this.hasConfig()) return { success: false, error: 'Supabase não configurado.' };
+    
+    const state = this.getLocal();
+    if (state.players.length === 0) return { success: true, count: 0 };
+
+    try {
+      console.log('Migrando jogadores para Supabase...');
+      const playersPayload = state.players.map(p => ({
+        id: p.id,
+        name: p.name,
+        username: p.username,
+        avatar: p.avatar,
+        password: p.password,
+        matches_played: p.matchesPlayed,
+        wins: p.wins,
+        losses: p.losses,
+        points: p.points,
+        last_active: p.lastActive,
+        role: p.role || 'player'
+      }));
+
+      // Usando upsert sem onConflict para usar a Primary Key (id)
+      const { error: pError } = await supabase.from('players').upsert(playersPayload);
+      if (pError) {
+        console.error('Erro ao sincronizar jogadores:', pError);
+        return { success: false, error: `Erro nos jogadores: ${pError.message}` };
+      }
+
+      if (state.matches.length > 0) {
+        console.log('Migrando partidas para Supabase...');
+        const matchesPayload = state.matches.map(m => ({
+          id: m.id,
+          date: m.date,
+          player_1_id: m.player1Id,
+          player_2_id: m.player2Id,
+          player_1_name: m.player1Name,
+          player_2_name: m.player2Name,
+          winner_id: m.winnerId,
+          sets: m.sets,
+          type: m.type,
+          status: m.status,
+          reported_by: m.reportedBy
+        }));
+
+        const { error: mError } = await supabase.from('matches').upsert(matchesPayload);
+        if (mError) return { success: false, error: `Erro nas partidas: ${mError.message}` };
+      }
+
+      return { success: true, count: state.players.length };
+    } catch (e) {
+      return { success: false, error: 'Erro na conexão durante sincronização.' };
+    }
   }
 };
